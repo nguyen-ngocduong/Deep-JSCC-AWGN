@@ -1,25 +1,79 @@
 """
 Data Loading Module
 -------------------
-PyTorch Dataset và DataLoader cho CIFAR-10 trong project Deep JSCC.
+PyTorch Dataset và DataLoader cho tập dữ liệu ảnh cây cà chua trong project Deep JSCC.
+
+Cấu trúc thư mục data/raw mong đợi:
+    data/raw/
+        <class_name_1>/
+            img1.jpg
+            img2.png
+            ...
+        <class_name_2>/
+            ...
+    hoặc flat (tất cả ảnh nằm trực tiếp trong data/raw/, không có subdirectory).
 """
 
 import os
+from pathlib import Path
+from typing import Optional, Tuple, List
+
 import pandas as pd
 import torch
+from PIL import Image
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms, datasets
-from typing import Optional, Tuple
+from torchvision import transforms
 
 
-class CIFAR10SplitDataset(Dataset):
+# Định dạng ảnh được hỗ trợ
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
+
+
+def _scan_images(data_root: str) -> Tuple[List[str], List[int], List[str]]:
     """
-    Dataset CIFAR-10 dựa trên file CSV split.
+    Quét toàn bộ ảnh trong data_root.
+
+    Hỗ trợ 2 chế độ:
+    1. Có subdirectory (class-based): mỗi thư mục con là một nhãn lớp.
+    2. Flat: tất cả ảnh nằm thẳng trong data_root, nhãn = 0.
+
+    Returns:
+        paths: danh sách đường dẫn tuyệt đối tới ảnh.
+        labels: danh sách nhãn số nguyên tương ứng.
+        class_names: danh sách tên class theo thứ tự nhãn.
+    """
+    data_root = Path(data_root)
+    subdirs = sorted([d for d in data_root.iterdir() if d.is_dir()])
+
+    paths: List[str] = []
+    labels: List[int] = []
+    class_names: List[str] = []
+
+    if subdirs:
+        # Chế độ class-based (ImageFolder style)
+        class_names = [d.name for d in subdirs]
+        for label_idx, subdir in enumerate(subdirs):
+            for img_path in sorted(subdir.iterdir()):
+                if img_path.suffix.lower() in IMAGE_EXTENSIONS:
+                    paths.append(str(img_path))
+                    labels.append(label_idx)
+    else:
+        # Chế độ flat — tất cả ảnh cùng nhãn "tomato" (label=0)
+        class_names = ["tomato"]
+        for img_path in sorted(data_root.iterdir()):
+            if img_path.is_file() and img_path.suffix.lower() in IMAGE_EXTENSIONS:
+                paths.append(str(img_path))
+                labels.append(0)
+
+    return paths, labels, class_names
+
+
+class TomatoSplitDataset(Dataset):
+    """
+    Dataset ảnh cây cà chua dựa trên file CSV split.
 
     Args:
-        split_csv: Đường dẫn CSV chứa cột 'index', 'split'.
-        data_root: Thư mục raw CIFAR-10.
-        split: 'train', 'val', hoặc 'test'.
+        split_csv: Đường dẫn CSV chứa cột 'filepath', 'label', 'split'.
         image_size: Kích thước ảnh mục tiêu (resize).
         augment: Có dùng data augmentation hay không (chỉ cho train).
     """
@@ -27,24 +81,25 @@ class CIFAR10SplitDataset(Dataset):
     def __init__(
         self,
         split_csv: str,
-        data_root: str = "data/raw",
-        split: str = "train",
         image_size: int = 64,
         augment: bool = False,
+        split: str = "train",
     ):
         self.split = split
         self.image_size = image_size
 
-        # Đọc CSV để lấy danh sách index
+        # Đọc CSV
         df = pd.read_csv(split_csv)
-        self.indices = df["index"].tolist()
+        self.filepaths: List[str] = df["filepath"].tolist()
+        self.labels: List[int] = df["label"].tolist()
 
-        # Xác định transform
+        # Transform
         if augment and split == "train":
             self.transform = transforms.Compose([
                 transforms.Resize((image_size, image_size)),
                 transforms.RandomHorizontalFlip(),
-                transforms.RandomCrop(image_size, padding=4),
+                transforms.RandomVerticalFlip(),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
                 transforms.ToTensor(),
             ])
         else:
@@ -53,22 +108,13 @@ class CIFAR10SplitDataset(Dataset):
                 transforms.ToTensor(),
             ])
 
-        # Tải CIFAR-10 dataset gốc (không transform)
-        is_train_split = split in ("train", "val")
-        self.cifar = datasets.CIFAR10(
-            root=data_root,
-            train=is_train_split,
-            download=False,
-        )
-
     def __len__(self) -> int:
-        return len(self.indices)
+        return len(self.filepaths)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
-        cifar_idx = self.indices[idx]
-        img, label = self.cifar[cifar_idx]
+        img = Image.open(self.filepaths[idx]).convert("RGB")
         img_tensor = self.transform(img)
-        return img_tensor, label
+        return img_tensor, self.labels[idx]
 
 
 def get_dataloaders(
@@ -78,11 +124,11 @@ def get_dataloaders(
     augment: bool = True,
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """
-    Tạo DataLoader cho train, val và test.
+    Tạo DataLoader cho train, val và test từ tập cà chua.
 
     Args:
         config: Config dict.
-        data_root: Thư mục raw CIFAR-10.
+        data_root: Thư mục raw (chỉ dùng để tham chiếu, paths đã lưu trong CSV).
         split_dir: Thư mục chứa CSV splits.
         augment: Có dùng augmentation cho train hay không.
 
@@ -93,26 +139,23 @@ def get_dataloaders(
     batch_size = config.get("batch_size", 64)
     num_workers = config.get("num_workers", 4)
 
-    train_dataset = CIFAR10SplitDataset(
+    train_dataset = TomatoSplitDataset(
         split_csv=os.path.join(split_dir, "train.csv"),
-        data_root=data_root,
-        split="train",
         image_size=image_size,
         augment=augment,
+        split="train",
     )
-    val_dataset = CIFAR10SplitDataset(
+    val_dataset = TomatoSplitDataset(
         split_csv=os.path.join(split_dir, "val.csv"),
-        data_root=data_root,
+        image_size=image_size,
+        augment=False,
         split="val",
-        image_size=image_size,
-        augment=False,
     )
-    test_dataset = CIFAR10SplitDataset(
+    test_dataset = TomatoSplitDataset(
         split_csv=os.path.join(split_dir, "test.csv"),
-        data_root=data_root,
-        split="test",
         image_size=image_size,
         augment=False,
+        split="test",
     )
 
     train_loader = DataLoader(
@@ -151,12 +194,11 @@ def get_test_loader_only(
     batch_size = config.get("batch_size", 64)
     num_workers = config.get("num_workers", 4)
 
-    test_dataset = CIFAR10SplitDataset(
+    test_dataset = TomatoSplitDataset(
         split_csv=os.path.join(split_dir, "test.csv"),
-        data_root=data_root,
-        split="test",
         image_size=image_size,
         augment=False,
+        split="test",
     )
     return DataLoader(
         test_dataset,
