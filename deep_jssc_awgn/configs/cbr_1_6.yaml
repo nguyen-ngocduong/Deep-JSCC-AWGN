@@ -1,0 +1,22 @@
+project_name: deep_jscc_awgn
+seed: 42
+image_size: 64
+batch_size: 64
+num_workers: 4
+channel:
+  type: awgn
+  train_snr_db: 10
+  test_snr_db: [0, 5, 10, 15, 20]
+  monte_carlo_runs: 20
+jscc:
+  cbr: 0.1666667 # 1/6
+  n_symbols: 2048 # 64*64*3/6
+train:
+  epochs: 100
+  optimizer: adam
+  lr: 0.001
+  loss: mse
+  save_best_by: val_mse
+baseline:
+  jpeg_quality_list: [5, 10, 20, 30, 50]
+  repetition_factor: 3
