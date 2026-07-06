@@ -175,16 +175,25 @@ def freeze_checkpoint(
 
     # Đọc manifest cũ nếu có (giữ history)
     if os.path.isfile(manifest_path):
-        with open(manifest_path, "r", encoding="utf-8") as f:
-            old_manifest = json.load(f)
-        # Giữ history
-        history = old_manifest.get("history", [])
-        history.append({
-            "status": old_manifest.get("status"),
-            "frozen_at": old_manifest.get("frozen_at"),
-            "note": old_manifest.get("note"),
-        })
-        manifest["history"] = history
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+            if content:
+                old_manifest = json.loads(content)
+                # Giữ history
+                history = old_manifest.get("history", [])
+                history.append({
+                    "status": old_manifest.get("status"),
+                    "frozen_at": old_manifest.get("frozen_at"),
+                    "note": old_manifest.get("note"),
+                })
+                manifest["history"] = history
+            else:
+                # File rỗng — bỏ qua, không có history
+                pass
+        except json.JSONDecodeError as e:
+            print(f"⚠️  manifest.json bị hỏng hoặc rỗng ({e}), ghi đè mới.")
+            manifest["history"] = []
 
     os.makedirs(manifest_dir, exist_ok=True)
     with open(manifest_path, "w", encoding="utf-8") as f:
@@ -211,12 +220,19 @@ def show_status(base_dir: str = "."):
             base_dir, "frozen", cp_info["name"], "manifest.json"
         )
         if os.path.isfile(manifest_path):
-            with open(manifest_path, "r", encoding="utf-8") as f:
-                manifest = json.load(f)
-            status = manifest.get("status", "UNKNOWN")
-            frozen_at = manifest.get("frozen_at", "N/A")
-            icon = "✅" if status == "PASS" else "❌"
-            print(f"  {icon} {cp_id}: {status} (frozen at {frozen_at[:10]})")
+            try:
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                if content:
+                    manifest = json.loads(content)
+                    status = manifest.get("status", "UNKNOWN")
+                    frozen_at = manifest.get("frozen_at", "N/A")
+                    icon = "✅" if status == "PASS" else "❌"
+                    print(f"  {icon} {cp_id}: {status} (frozen at {frozen_at[:10]})")
+                else:
+                    print(f"  ⬜ {cp_id}: manifest.json rỗng")
+            except json.JSONDecodeError:
+                print(f"  ⚠️  {cp_id}: manifest.json bị hỏng")
         else:
             print(f"  ⬜ {cp_id}: chưa đóng băng")
     print("=" * 60)

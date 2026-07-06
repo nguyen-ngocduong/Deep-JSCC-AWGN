@@ -1,0 +1,10 @@
+{
+  "checkpoint": "C0",
+  "name": "C0_environment",
+  "description": "Kiểm tra môi trường (torch, torchvision, skimage, PIL, pandas, matplotlib)",
+  "status": "PASS",
+  "frozen_at": "2026-07-06T16:09:21.021889",
+  "note": "Test fix empty manifest",
+  "required_files": {},
+  "n_missing_files": 0
+}
